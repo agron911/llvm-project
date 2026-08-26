@@ -869,11 +869,6 @@ bool StraightLineStrengthReduce::candidatePredicate(Candidate *Basis,
       !C.isProfitableRewrite(*Delta, Candidate::IndexDelta))
     return false;
 
-  // If there is a Delta that we can reuse Basis to rewrite C, clean up
-  // previously collected poison generating instructions.
-  for (Instruction *I : Basis->DropList)
-    I->dropPoisonGeneratingAnnotations();
-
   // Record delta if none has been found yet, or the new delta is
   // a constant that is better than the existing delta.
   if (!C.Delta || isa<ConstantInt>(Delta)) {
@@ -1161,7 +1156,7 @@ void StraightLineStrengthReduce::allocateCandidatesAndFindBasis(
   // Only add to the dict if this instruction is safe to reuse as a basis. By
   // doing this early we avoid calling canReuseInstruction repeatedly for the
   // same instruction. The DropList is stored on the Candidate so
-  // candidatePredicate can drop the flags when a rewrite is being done.
+  // rewriteCandidate can drop the flags when a rewrite is actually done.
   if (!EnablePoisonReuseGuard ||
       canReuseInstruction(SE->getSCEV(I), I, Candidates.back().DropList)) {
     CandidateDict.add(Candidates.back());
@@ -1458,6 +1453,13 @@ void StraightLineStrengthReduce::rewriteCandidate(const Candidate &C) {
     };
     Reduced->takeName(C.Ins);
   }
+  // Reusing Basis is only valid once its poison-generating annotations are
+  // dropped, so do it here rather than while searching for a basis: a basis
+  // that is only considered, or that path compression later replaces, keeps
+  // its flags. Basis is whichever candidate was finally selected, so this also
+  // covers a basis picked by compressPath.
+  for (Instruction *I : Basis.DropList)
+    I->dropPoisonGeneratingAnnotations();
   C.Ins->replaceAllUsesWith(Reduced);
   DeadInstructions.push_back(C.Ins);
 }
