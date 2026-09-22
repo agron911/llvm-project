@@ -878,6 +878,24 @@ bool SIPreEmitPeephole::run(MachineFunction &MF, MachineLoopInfo *LoopInfo) {
   MF.RenumberBlocks();
 
   for (MachineBasicBlock &MBB : MF) {
+    if (ST.hasGFX950Insts()) {
+      for (MachineInstr &MI : MBB) {
+        if (MI.getOpcode() != AMDGPU::V_PK_MUL_F32)
+          continue;
+        const auto *Src0Mods =
+            TII->getNamedOperand(MI, AMDGPU::OpName::src0_modifiers);
+        const auto *Src1Mods =
+            TII->getNamedOperand(MI, AMDGPU::OpName::src1_modifiers);
+        if (Src0Mods->getImm() != SISrcMods::OP_SEL_1 ||
+            Src1Mods->getImm() != (SISrcMods::OP_SEL_0 | SISrcMods::OP_SEL_1))
+          continue;
+
+        // On gfx950, a high source-1 broadcast can produce incorrect results
+        // in MFMA sequences, even beyond the modeled dependency latency.
+        Changed |= TII->commuteInstruction(MI, /*NewMI=*/false) != nullptr;
+      }
+    }
+
     Changed |= removeRedundantModeWrites(MBB);
 
     MachineBasicBlock::iterator TermI = MBB.getFirstTerminator();
